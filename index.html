@@ -551,6 +551,14 @@ table#ckTable td.code .ckm{max-width:170px}
 <div id="cap" aria-hidden="true" hidden></div>
 <div class="busy" id="busy" hidden><div><b>Đang tạo PDF…</b><br><span>Vui lòng giữ trang này mở</span></div></div>
 
+<div class="modal" id="gate" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="gT" style="text-align:center">
+    <h3 id="gT">Đăng nhập PGNTT</h3>
+    <p class="hint">Chỉ tài khoản Gmail được cấp quyền mới xem được dữ liệu.</p>
+    <div id="gBtn" style="display:flex;justify-content:center;margin:12px 0"></div>
+    <p id="gMsg" style="color:var(--red);font-size:13px"></p>
+  </div>
+</div>
 <div class="modal" id="dataModal" hidden>
   <div class="box" role="dialog" aria-modal="true" aria-labelledby="dmT">
     <h3 id="dmT">Dữ liệu nguồn</h3>
@@ -566,9 +574,8 @@ table#ckTable td.code .ckm{max-width:170px}
     <p id="dmMsg"></p>
     <div class="sync-box" style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px;background:var(--surface-2)">
       <b>Kho chung (Google Sheet)</b>
-      <p class="hint">Nhập URL web app Apps Script và khoá truy cập. Mỗi máy nhập một lần; khoá được lưu trên trình duyệt này.</p>
-      <div class="grid"><label class="f w2">URL Apps Script<input class="in" id="gsUrl" placeholder="https://script.google.com/macros/s/.../exec"></label><label class="f">Khoá truy cập<input class="in" id="gsKey" type="password" autocomplete="off"></label></div>
-      <div class="row" style="gap:8px;margin-top:8px"><button class="btn sm" id="bGsSave" type="button">Lưu và kiểm tra kết nối</button><button class="btn sm" id="bGsPull" type="button">Tải lại từ kho chung</button></div>
+      <p class="hint" id="gsWho"></p>
+      <div class="row" style="gap:8px;margin-top:8px"><button class="btn sm" id="bGsPull" type="button">Tải lại từ kho chung</button><button class="btn sm" id="bGsOut" type="button">Đăng xuất</button></div>
       <div id="syncList" class="hint" style="margin-top:10px;line-height:1.7"></div>
     </div>
     <div class="row" style="justify-content:space-between;margin-top:12px">
@@ -582,6 +589,7 @@ table#ckTable td.code .ckm{max-width:170px}
 <div class="fdd" id="fdd" hidden role="listbox"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script id="seed" type="application/json">{"kh":[],"sp":[],"ck":[],"km":[],"dcr":[],"progs":[],"bud":{},"npp":"","bg":[]}
 </script>
@@ -1010,10 +1018,8 @@ $('bNew').onclick=()=>{ST=blankState();fillForm();schedule();$('khQ').focus();to
 /* ---------- Dữ liệu nguồn ---------- */
 function drawStats(){$('dmStats').innerHTML=[[DATA.kh.length,'Khách hàng'],[DATA.sp.length,'Sản phẩm'],[ckData().list.length,'CTKM'],[Object.keys(DATA.bud||{}).length,'Route có NS'],[DATA.ck.length,'Mức CK bảng'],[DATA.dcr.length,'NVBH']].map(([n,l])=>`<div><b>${n.toLocaleString('en-US')}</b><span>${l}</span></div>`).join('');
   $('nppName').value=NPP.name;$('nppAddr').value=NPP.addr;$('nppCode').value=DATA.npp||''}
-$('bData').onclick=()=>{drawStats();$('dmMsg').textContent='';const g=gsCfg()||{};$('gsUrl').value=g.url||'';$('gsKey').value=g.key||'';renderSync();$('dataModal').hidden=false};
-$('bGsSave').onclick=async()=>{const url=$('gsUrl').value.trim(),key=$('gsKey').value.trim();if(!url||!key){toast('Nhập URL và khoá truy cập');return}
-  LS.set(GS_KEY,{url,key});DBX=null;await dbInit();
-  try{await DBX.doc('ping/master').get();toast('Kết nối kho chung thành công');await syncAll();drawStats();refreshAll()}catch(e){toast('Không kết nối được: '+(e.message||e))}renderSync()};
+$('bData').onclick=()=>{drawStats();$('dmMsg').textContent='';const sess=gidSession();$('gsWho').textContent=gsCfg()?(sess?'Đang đăng nhập: '+sess.email:'Chưa đăng nhập'):'Chưa cấu hình kho chung: dữ liệu chỉ lưu trên máy này.';renderSync();$('dataModal').hidden=false};
+$('bGsOut').onclick=()=>{signOut();$('dataModal').hidden=true;showGate()};
 $('bGsPull').onclick=async()=>{if(!gsCfg()){toast('Chưa kết nối kho chung');return}if(await syncAll())toast('Đã tải lại từ kho chung')};
 $('bCloseData').onclick=()=>{$('dataModal').hidden=true};
 $('dataModal').addEventListener('click',e=>{if(e.target.id==='dataModal')$('dataModal').hidden=true});
@@ -1126,12 +1132,26 @@ const pxRaw=v=>String(v??'').replace(/\D/g,'');
 function bgMarkDirty(){LS.set('pgntt.bgDirty',1);bgStat()}
 /* Kho dùng chung (db của artifact): máy khác mở trang sẽ thấy cùng dữ liệu. Ngoài artifact (file offline) chỉ lưu trên máy này. */
 let DBX=null;
-/* Kho chung: mở trên claude.ai thì dùng kho của claude; mở bản web (GitHub Pages) thì dùng Google Sheet qua Apps Script */
-const GS_KEY='pgntt.gs';
-function gsCfg(){const c=LS.get(GS_KEY);return c&&c.url&&c.key?c:null}
-function sheetsDB(cfg){const call=async(op,doc,body)=>{const r=await fetch(cfg.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({op,key:cfg.key,doc,body})});const j=await r.json();if(!j.ok)throw new Error(j.error||'Kho chung trả lỗi');return j};
+/* Kho chung: mở trên claude.ai thì dùng kho của claude; mở bản web (GitHub Pages) thì dùng Google Sheet qua Apps Script.
+   Bản web: người dùng đăng nhập Google, Apps Script kiểm tra email có trong tab "allow" không. */
+const GS_URL='';
+const CLIENT_ID='810614813045-40l6555pq5viov5mlgh69ec7a0tcse4m.apps.googleusercontent.com';
+const GID_KEY='pgntt.gid';
+function gsCfg(){return GS_URL&&!GS_URL.startsWith('__')?{url:GS_URL}:null}
+function gidSession(){const s=LS.get(GID_KEY);if(!s||!s.token||!s.exp||s.exp*1000<Date.now()+60000)return null;return s}
+function jwtPayload(t){try{const b=t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');return JSON.parse(decodeURIComponent(escape(atob(b))))}catch(e){return null}}
+function showGate(msg){$('gMsg').textContent=msg||'';$('gate').hidden=false}
+function hideGate(){$('gate').hidden=true;$('gMsg').textContent=''}
+function signOut(){LS.del(GID_KEY);DBX=null;renderSync()}
+function onGoogleCredential(resp){const pl=jwtPayload(resp.credential);if(!pl||!pl.email)return;LS.set(GID_KEY,{token:resp.credential,exp:pl.exp,email:pl.email,name:pl.name||''});hideGate();
+  syncAll().then(ok=>{if(ok)toast('Đã tải dữ liệu chung')})}
+function initGid(){if(!gsCfg())return;if(!window.google||!google.accounts){setTimeout(initGid,300);return}
+  google.accounts.id.initialize({client_id:CLIENT_ID,callback:onGoogleCredential,auto_select:true,cancel_on_tap_outside:false});
+  google.accounts.id.renderButton($('gBtn'),{theme:'outline',size:'large',text:'signin_with',locale:'vi',width:260})}
+function sheetsDB(sess){const call=async(op,doc,body)=>{const r=await fetch(gsCfg().url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({op,idToken:sess.token,doc,body})});const j=await r.json();
+    if(!j.ok){if(j.code==='auth'||j.code==='forbidden'){signOut();showGate(j.code==='forbidden'?(j.error||'Email chưa được cấp quyền')+'. Liên hệ chủ dữ liệu để được cấp quyền.':'Phiên đăng nhập hết hạn, hãy đăng nhập lại.')}throw new Error(j.error||'Kho chung trả lỗi')}return j};
   return {doc:n=>({get:async()=>{const j=await call('get',n);return {exists:!!j.exists,data:()=>j.data||null}},set:async b=>{await call('set',n,b)}})}}
-async function dbInit(){try{if(window.claude&&typeof window.claude.use==='function'){DBX=await window.claude.use('db');return DBX}const g=gsCfg();DBX=g?sheetsDB(g):null}catch(e){DBX=null}return DBX}
+async function dbInit(){try{if(window.claude&&typeof window.claude.use==='function'){DBX=await window.claude.use('db');return DBX}const sess=gidSession();DBX=(gsCfg()&&sess)?sheetsDB(sess):null}catch(e){DBX=null}return DBX}
 /* Ghi nhận thời điểm cập nhật của từng khối dữ liệu trên kho chung */
 function markAt(n,at){if(!at)return;const m=LS.get('pgntt.docAt')||{};m[n]=at;LS.set('pgntt.docAt',m)}
 function bgSnapshotBody(){return {bg:LS.get('pgntt.bg')||{},bgNew:bgNew(),bgHide:bgHidden(),at:new Date().toISOString()}}
@@ -1343,7 +1363,7 @@ $('bCkAdd').onclick=()=>{const S=ckData();S.seq++;const r={id:'c'+Date.now(),seq
 
 /* ---------- Khởi động ---------- */
 loadData(LS.get('pgntt.data3')||JSON.parse(JSON.stringify(SEED)));applyBG();
-syncAll().then(ok=>{if(ok)toast('Đã tải dữ liệu chung')});
+if(gsCfg()){initGid();if(gidSession()){syncAll().then(ok=>{if(ok)toast('Đã tải dữ liệu chung')})}else showGate()}
 ST=LS.get('pgntt.draft3')||sampleState();
 ['goiOff','goiSuat','km','tt'].forEach(k=>{if(!ST[k])ST[k]=(k==='km'||k==='tt')?[]:{}});
 fillForm();

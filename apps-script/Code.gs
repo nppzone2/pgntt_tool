@@ -1,15 +1,20 @@
 /**
- * Kho chung cho PGNTT: lưu từng khối dữ liệu (data/master, bg/master, ck/master...) vào tab "store" của Google Sheet.
- * Cài đặt: xem README.md mục "Cài Google Sheet".
+ * Kho chung cho PGNTT (Google Sheet + Apps Script).
+ * - Tab "store": lưu dữ liệu, do ứng dụng tự quản lý.
+ * - Tab "allow": danh sách Gmail được xem và ghi dữ liệu, mỗi email một dòng ở cột A (dòng 1 là tiêu đề).
+ * - Thuộc tính tập lệnh: CLIENT_ID = Client ID OAuth (web).
+ * Xem README.md để cài đặt.
  */
 const STORE_SHEET = 'store';
-const CHUNK = 45000; // mỗi ô tối đa 50.000 ký tự, để dư chỗ
+const ALLOW_SHEET = 'allow';
+const CHUNK = 45000; // mỗi ô tối đa 50.000 ký tự
 
 function doPost(e) {
   try {
     const req = JSON.parse(e.postData.contents);
-    const key = PropertiesService.getScriptProperties().getProperty('KEY');
-    if (!key || req.key !== key) return out({ ok: false, error: 'Sai khoá truy cập' });
+    const who = verifyToken_(req.idToken);
+    if (!who.ok) return out({ ok: false, code: 'auth', error: who.error });
+    if (!isAllowed_(who.email)) return out({ ok: false, code: 'forbidden', error: 'Email ' + who.email + ' chưa được cấp quyền' });
     const sh = getStore_();
     if (req.op === 'get') return out(Object.assign({ ok: true }, readDoc_(sh, req.doc)));
     if (req.op === 'set') { writeDoc_(sh, req.doc, req.body); return out({ ok: true }); }
@@ -17,6 +22,24 @@ function doPost(e) {
   } catch (err) {
     return out({ ok: false, error: String(err) });
   }
+}
+
+function verifyToken_(idToken) {
+  if (!idToken) return { ok: false, error: 'Thiếu token đăng nhập' };
+  const r = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken), { muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200) return { ok: false, error: 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn' };
+  const p = JSON.parse(r.getContentText());
+  const clientId = PropertiesService.getScriptProperties().getProperty('CLIENT_ID');
+  if (!clientId || p.aud !== clientId) return { ok: false, error: 'Sai Client ID' };
+  if (String(p.email_verified) !== 'true') return { ok: false, error: 'Email chưa được xác minh' };
+  return { ok: true, email: String(p.email).trim().toLowerCase() };
+}
+
+function isAllowed_(email) {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ALLOW_SHEET);
+  if (!sh || sh.getLastRow() < 2) return false;
+  const v = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+  return v.some(r => String(r[0]).trim().toLowerCase() === email);
 }
 
 function out(o) {
@@ -37,14 +60,12 @@ function getStore_() {
 function readDoc_(sh, doc) {
   const v = sh.getDataRange().getValues();
   const parts = [];
-  let at = '';
   for (let i = 1; i < v.length; i++) {
-    if (v[i][0] === doc) { parts.push([Number(v[i][1]), String(v[i][3])]); at = String(v[i][2]); }
+    if (v[i][0] === doc) parts.push([Number(v[i][1]), String(v[i][3])]);
   }
   if (!parts.length) return { exists: false };
   parts.sort((a, b) => a[0] - b[0]);
-  const json = parts.map(p => p[1]).join('');
-  return { exists: true, data: JSON.parse(json) };
+  return { exists: true, data: JSON.parse(parts.map(p => p[1]).join('')) };
 }
 
 function writeDoc_(sh, doc, body) {
