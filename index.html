@@ -1134,7 +1134,7 @@ function bgMarkDirty(){LS.set('pgntt.bgDirty',1);bgStat()}
 let DBX=null;
 /* Kho chung: mở trên claude.ai thì dùng kho của claude; mở bản web (GitHub Pages) thì dùng Google Sheet qua Apps Script.
    Bản web: người dùng đăng nhập Google, Apps Script kiểm tra email có trong tab "allow" không. */
-const GS_URL='';
+const GS_URL='https://script.google.com/macros/s/AKfycbw0gzgjBzwfyirZScmXkGHnfbq8HsyqJMzU434yDopEL8qPRliAIrJkwGr4JRsbHYlYMQ/exec';
 const CLIENT_ID='810614813045-40l6555pq5viov5mlgh69ec7a0tcse4m.apps.googleusercontent.com';
 const GID_KEY='pgntt.gid';
 function gsCfg(){return GS_URL&&!GS_URL.startsWith('__')?{url:GS_URL}:null}
