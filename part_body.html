@@ -234,6 +234,7 @@
       <b>Kho chung (Google Sheet)</b>
       <p class="hint" id="gsWho"></p>
       <div class="row" style="gap:8px;margin-top:8px"><button class="btn sm" id="bGsPull" type="button">Tải lại từ kho chung</button><button class="btn sm" id="bGsOut" type="button">Đăng xuất</button></div>
+      <div class="row" style="gap:8px;margin-top:8px"><label class="btn sm" for="bundleIn" style="cursor:pointer">Nhập bản sao từ Artifact (JSON)</label><input type="file" id="bundleIn" accept=".json,application/json" hidden></div>
       <div id="syncList" class="hint" style="margin-top:10px;line-height:1.7"></div>
     </div>
     <div class="row" style="justify-content:space-between;margin-top:12px">
@@ -677,6 +678,16 @@ function drawStats(){$('dmStats').innerHTML=[[DATA.kh.length,'Khách hàng'],[DA
   $('nppName').value=NPP.name;$('nppAddr').value=NPP.addr;$('nppCode').value=DATA.npp||''}
 $('bData').onclick=()=>{drawStats();$('dmMsg').textContent='';const sess=gidSession();$('gsWho').textContent=gsCfg()?(sess?'Đang đăng nhập: '+sess.email:'Chưa đăng nhập'):'Chưa cấu hình kho chung: dữ liệu chỉ lưu trên máy này.';renderSync();$('dataModal').hidden=false};
 $('bGsOut').onclick=()=>{signOut();$('dataModal').hidden=true;showGate()};
+/* Nạp bản sao bảng giá riêng, CTKM, gói đánh, TOT, DSKH bổ sung (file JSON xuất từ Artifact) rồi đẩy lên kho chung */
+$('bundleIn').addEventListener('change',async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;
+  if(!gsCfg()||!gidSession()){toast('Hãy đăng nhập Google trước khi nhập');return}
+  try{const b=JSON.parse(await f.text());await dbInit();if(!DBX){toast('Chưa kết nối kho chung');return}
+    const names={bg:'bg/master',ck:'ck/master',cfg:'cfg/master',tot:'tot/master',dsk:'dsk/master'};let n=0;
+    for(const k of Object.keys(names)){const body=b[k];if(!body)continue;const at=body.at||new Date().toISOString();
+      await DBX.doc(names[k]).set(Object.assign({},body,{at}));markAt(k,at);n++}
+    LS.del('pgntt.bgDirty');LS.del('pgntt.ckDirty');LS.del('pgntt.cfgDirty');LS.del('pgntt.dskDirty');LS.del('pgntt.totDirty');
+    await syncAll();toast('Đã đẩy '+n+' khối dữ liệu lên kho chung')}
+  catch(err){toast('Không nhập được bản sao: '+(err.message||err))}});
 $('bGsPull').onclick=async()=>{if(!gsCfg()){toast('Chưa kết nối kho chung');return}if(await syncAll())toast('Đã tải lại từ kho chung')};
 $('bCloseData').onclick=()=>{$('dataModal').hidden=true};
 $('dataModal').addEventListener('click',e=>{if(e.target.id==='dataModal')$('dataModal').hidden=true});
